@@ -5,7 +5,8 @@ services:
       args:
         # Leave unset for the latest data release, or set to a specific release's zip URL.
         DATA_URL: ${DATA_URL:-https://github.com/justinfritts/geocoder/releases/latest/download/geocoder-data.zip}
-    image: geocoder:latest
+    # Built here, never pulled: there is no published image, and Portainer pulls before deploying.
+    pull_policy: build
     container_name: geocoder
     ports:
       - "${GEOCODER_PORT:-8231}:80"
