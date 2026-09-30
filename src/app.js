@@ -255,6 +255,39 @@ async function run() {
         el("progress").className = "status bad";
         return;
     }
+    /**
+     * Ask where to save BEFORE anything else, while the click is still warm.
+     *
+     * showSaveFilePicker needs transient user activation, which lasts a few seconds and is
+     * spent by the call. Scanning four million rows for their countries takes far longer than
+     * that, so the dialog has to be raised here, on the click itself, rather than when the
+     * result is ready.
+     *
+     * The payoff is that the result is written to disk as it is produced and never exists in
+     * memory at all. Without it the output accumulates, and on a large file the run does not
+     * merely end in a crash - it slows to a crawl well before that, because a heap this full
+     * spends an ever-growing share of every second collecting garbage.
+     */
+    let writable = null;
+    let savedAs = "";
+    if (window.showSaveFilePicker) {
+        try {
+            const handle = await window.showSaveFilePicker({
+                suggestedName: state.filename.replace(/\.[^.]+$/, "") + "-geocoded.csv",
+                types: [{ description: "CSV", accept: { "text/csv": [".csv"] } }],
+            });
+            writable = await handle.createWritable();
+            savedAs = handle.name;
+        } catch (err) {
+            if (err && err.name === "AbortError") {
+                return;
+            }
+            // Any other failure - an unsupported origin, a denied permission - is not fatal.
+            // The in-memory path still works; it just cannot go as large.
+            console.warn("Streaming to disk unavailable, holding the result in memory: " + err.message);
+        }
+    }
+
     el("run").disabled = true;
     show("result", false);
     const body = state.rows.slice(state.hasHeader ? 1 : 0);
@@ -318,11 +351,18 @@ async function run() {
      * array of blocks directly, so the giant intermediate string never exists at all.
      */
     const blocks = [];
-    let pending = [toCsvRow(header)];
-    const flushBlock = () => {
-        if (pending.length) {
-            blocks.push(pending.join(""));
-            pending = [];
+    let pending = [CSV_BOM + toCsvRow(header)];
+    const flushBlock = async () => {
+        if (!pending.length) {
+            return;
+        }
+        const text = pending.join("");
+        pending = [];
+        if (writable) {
+            // Written straight through to the file. Nothing is retained.
+            await writable.write(text);
+        } else {
+            blocks.push(text);
         }
     };
 
@@ -379,12 +419,40 @@ async function run() {
         }
         pending.push(toCsvRow(row));
         if (pending.length >= 5000) {
-            flushBlock();
+            await flushBlock();
+            if (writable) {
+                /**
+                 * Release the rows already written.
+                 *
+                 * Only when streaming to disk, because only then is the run guaranteed to be
+                 * a single pass over the data. It is the other half of the memory: the parsed
+                 * input costs about 124 MB per million five-column rows, so on a large file
+                 * it outweighs everything else still held.
+                 *
+                 * Both references have to go. `body` is a slice of `state.rows`, which is a
+                 * copy of the pointers rather than of the rows, so clearing one leaves the
+                 * other holding every row alive.
+                 */
+                const upto = i + 1;
+                const offset = state.hasHeader ? 1 : 0;
+                for (let j = upto - 5000; j < upto; j++) {
+                    if (j >= 0) {
+                        body[j] = null;
+                        state.rows[j + offset] = null;
+                    }
+                }
+            }
         }
     }
-    flushBlock();
+    await flushBlock();
+    if (writable) {
+        await writable.close();
+        // The rows are gone, so a second run on the same file is not possible.
+        state.rows = [];
+    }
 
-    state.output = blocks;
+    state.output = writable ? null : blocks;
+    state.savedAs = savedAs;
     const failed = body.length - ok - approximate;
     el("progress").textContent = "";
     el("progress").className = "status";
@@ -426,6 +494,15 @@ async function run() {
         }
         list.appendChild(table);
     }
+    // When it streamed to disk the file is already complete, so offering a download would be
+    // both wrong and impossible - nothing was kept to download.
+    el("download").hidden = Boolean(writable);
+    el("saved").textContent = writable
+        ? "Written to " + savedAs + " as it was geocoded. Re-running needs the file dropped in again, "
+            + "because the rows were released as they were written."
+        : "";
+    el("saved").className = writable ? "status ok" : "status";
+
     show("result", true);
     el("run").disabled = false;
 }

@@ -67,11 +67,16 @@
      Illinois are 167,882, 153,606 and 116,565, and there is no honest way to choose. Rows
      decided this way say so in the Status column.</p>
   <button id="run">Geocode</button>
+  <p class="field-hint">On Chrome and Edge you will be asked where to save first, and the result
+     is written to that file as it is produced rather than held in memory. That is what makes a
+     multi-million row file possible &mdash; and why re-running one needs the file dropped in
+     again. Other browsers keep the result in memory and offer a download at the end.</p>
   <p id="progress" class="status"></p>
 
   <div id="result" hidden>
     <p id="summary" class="status"></p>
     <p id="flagged" class="status"></p>
+    <p id="saved" class="status"></p>
     <button id="download">Download the geocoded CSV</button>
     <div id="failures"></div>
   </div>
