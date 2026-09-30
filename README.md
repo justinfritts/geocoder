@@ -32,7 +32,7 @@ dist/
 Then open `dist/geocoder.html` — double-click it, no server needed. Drop in a CSV, confirm the
 columns it detected, click Geocode, download the result.
 
-[releases]: https://github.com/FrivenSolutions/geocoder/releases/latest
+[releases]: https://github.com/justinfritts/geocoder/releases/latest
 
 The data is a release asset rather than a committed file because Git keeps every version of
 everything forever. At 288 MB unpacked, each rebuild would add another 288 MB to the
