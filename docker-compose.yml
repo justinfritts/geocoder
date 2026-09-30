@@ -1,0 +1,12 @@
+services:
+  geocoder:
+    build:
+      context: .
+      args:
+        # Leave unset for the latest data release, or set to a specific release's zip URL.
+        DATA_URL: ${DATA_URL:-https://github.com/justinfritts/geocoder/releases/latest/download/geocoder-data.zip}
+    image: geocoder:latest
+    container_name: geocoder
+    ports:
+      - "${GEOCODER_PORT:-8231}:80"
+    restart: unless-stopped

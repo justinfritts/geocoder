@@ -41,6 +41,25 @@ gigabyte. Git LFS has the same problem in a different shape: GitHub's free tier 
 LFS storage and 1 GB of monthly bandwidth, so this data would allow four versions and about
 four clones a month. A release asset has neither limit and can be replaced in place.
 
+### Hosting it (Docker)
+
+To run it on a server so anyone on the network can use it from a browser:
+
+```bash
+git clone https://github.com/justinfritts/geocoder.git && cd geocoder
+docker compose up -d --build
+```
+
+Then open `http://<host>:8231`. The build downloads the latest data release itself, so the
+clone does not need it. To pin a data version, pass
+`--build-arg DATA_URL=https://github.com/justinfritts/geocoder/releases/download/v0.2.0/geocoder-data.zip`.
+
+The container is only nginx serving static files. Geocoding still runs in each visitor's
+browser, so uploaded spreadsheets never reach the server and a single small host can serve
+anyone. Shards are stored gzipped: the image carries 84 MB of data rather than 288 MB, and a US
+lookup downloads 7 MB instead of 26 MB. To update, `git pull` and run the
+same command again.
+
 Five columns are appended to your original file:
 
 | Column | Contents |

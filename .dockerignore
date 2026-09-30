@@ -1,0 +1,9 @@
+.git
+.tmp
+.claude
+node_modules
+*.zip
+dist/data
+dist/geocoder.html
+test
+*.csv
