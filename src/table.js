@@ -146,13 +146,27 @@ function quote(value) {
 }
 
 /**
- * Serializes to CSV with a byte order mark.
+ * One CSV line, terminated.
  *
- * The BOM is what makes Excel open a UTF-8 CSV without mangling every accented place name,
- * and the output of this tool is full of them.
+ * Rows are serialized one at a time as they are produced rather than collected and joined at
+ * the end. Joining needs the entire output as a single string, which on a multi-million row
+ * file is hundreds of megabytes of contiguous heap on top of the rows it was built from.
  */
+export function toCsvRow(values) {
+    return values.map(quote).join(",") + "\r\n";
+}
+
+/**
+ * The byte order mark that makes Excel read a UTF-8 CSV correctly.
+ *
+ * Without it Excel mangles every accented place name, and the output of this tool is full of
+ * them. Kept separate so it can be prepended to a stream of blocks rather than to one string.
+ */
+export const CSV_BOM = "﻿";
+
+/** Serializes a whole table at once. Convenient for small results; not used on the big path. */
 export function toCsv(rows) {
-    return "﻿" + rows.map((r) => r.map(quote).join(",")).join("\r\n") + "\r\n";
+    return CSV_BOM + rows.map(toCsvRow).join("");
 }
 
 /**
