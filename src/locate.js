@@ -25,7 +25,20 @@ import { getIndex, getShard } from "./gazetteer.js";
  * airfield equivalent. GeoNames carries them, and a great many of them have names that are
  * still in use for something else nearby.
  */
-const FORMER = new Set(["PPLQ", "PPLW", "PPLH", "PPLCH", "AIRQ"]);
+const FORMER = new Set(["PPLQ", "PPLW", "PPLH", "PPLCH", "AIRQ", "MFGQ",
+    "ADM1H", "ADM2H", "ADM3H", "ADM4H", "ADM5H", "ADMDH"]);
+
+/**
+ * Administrative areas - townships, counties, districts, shires.
+ *
+ * An area is not a point. Whatever coordinate GeoNames records for a county is a
+ * representative position inside it, so every row that resolves to one is reported as
+ * approximate however precise the number looks, and they rank below anything that genuinely
+ * has a location.
+ */
+const ADMIN = new Set(["ADM1", "ADM2", "ADM3", "ADM4", "ADM5", "ADMD", "ADMS",
+    "PRSH", "TERR", "ZN", "ZNB", "LTER",
+    "ADM1H", "ADM2H", "ADM3H", "ADM4H", "ADM5H", "ADMDH"]);
 
 /**
  * Places that exist but are a part of something rather than a thing: a named section of a
@@ -36,7 +49,8 @@ const SECTION = new Set(["PPLX", "PPLL"]);
 /** Neither kind may win a tie against a real town. */
 const MINOR = new Set([...FORMER, ...SECTION]);
 
-const TIER_LABEL = ["national capital", "populated place", "facility", "minor or former place"];
+const TIER_LABEL = ["national capital", "populated place", "facility", "building",
+    "administrative area", "minor or former place"];
 
 /**
  * Why a match is worth a second look, or an empty string where it is not.
@@ -51,6 +65,12 @@ function caveatOf(code) {
     }
     if (SECTION.has(code)) {
         return "a section or locality within a larger place, not a town in its own right";
+    }
+    if (ADMIN.has(code)) {
+        return "an administrative area, not a settlement - the point is somewhere inside it";
+    }
+    if (code === "BLDG") {
+        return "a single named building";
     }
     return "";
 }
@@ -74,12 +94,25 @@ const FEATURE_NAME = {
     PPLX: "section of a populated place",
     MILB: "military base", NVB: "naval base", INSM: "military installation",
     BRKS: "barracks", AIRB: "air base", MVA: "maneuver area", LTER: "leased area",
-    RNGA: "range", AIRP: "airport", AIRF: "airfield", AIRH: "heliport",
+    RNGA: "artillery range", AIRP: "airport", AIRF: "airfield", AIRH: "heliport",
     AIRQ: "abandoned airfield", AIRT: "airport terminal", AIRS: "seaplane landing area",
     PRT: "port", HBR: "harbour", DCKY: "dockyard", WHRF: "wharf", LDNG: "landing",
     FY: "ferry", FYT: "ferry terminal", RSTN: "railway station", RSTP: "railway stop",
     BUSTN: "bus station", BUSTP: "bus stop", PSTB: "border post", PSTC: "customs post",
     CSTM: "customs house",
+    FT: "fort", STNC: "coast guard station", MFGM: "munitions plant",
+    SCHM: "military school", ZNB: "buffer zone", BTYD: "boatyard",
+    TRMO: "oil pipeline terminal", TRANT: "transit terminal",
+    MFG: "factory", MFGQ: "abandoned factory", BLDO: "office building",
+    DPOF: "fuel depot", OILR: "oil refinery", ADMF: "government facility",
+    CTRF: "facility centre", BLDG: "building",
+    ADM1: "first-order administrative division", ADM2: "county or second-order division",
+    ADM3: "township or third-order division", ADM4: "fourth-order administrative division",
+    ADM5: "fifth-order administrative division", ADMD: "administrative division",
+    ADMS: "school district", PRSH: "parish", TERR: "territory", ZN: "zone",
+    ADM1H: "former first-order division", ADM2H: "former county",
+    ADM3H: "former township", ADM4H: "former fourth-order division",
+    ADM5H: "former fifth-order division", ADMDH: "former administrative division",
 };
 
 function describeKind(code) {
@@ -109,7 +142,18 @@ function tierOf(code) {
     if (code === "PPLC") {
         return 0;
     }
-    if (MINOR.has(code)) {
+    if (MINOR.has(code) || FORMER.has(code)) {
+        return 5;
+    }
+    if (ADMIN.has(code)) {
+        // Below everything that has a real position. An exact point always beats an area: a
+        // row saying "Bedford" means the town, not the borough that contains it, and only
+        // falls through to the area when no such town exists.
+        return 4;
+    }
+    if (code === "BLDG") {
+        // A named building outranks nothing much. Carried on request, ranked here so a fire
+        // station can never displace the town it stands in.
         return 3;
     }
     return code.slice(0, 3) === "PPL" ? 1 : 2;
@@ -551,6 +595,9 @@ export function locate(input, options) {
         kind: describeKind(code),
         code: code,
         caveat: caveatOf(code),
+        // An area's coordinate is a representative point inside it, not the location of a
+        // thing, so it is reported the same way a state-only row already is.
+        approximate: ADMIN.has(code) || undefined,
         dominant: dominant,
         adjusted: adjusted,
     };

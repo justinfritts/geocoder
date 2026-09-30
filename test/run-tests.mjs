@@ -188,6 +188,27 @@ check("Antrim still finds the town", "Antrim||GBR", [54.7195, -6.2072, 0.3]);
 check("Belfast still finds the city", "Belfast||GBR", [54.5964, -5.9301, 0.3]);
 check("Bedford still finds the town", "Bedford||GBR", [52.1350, -0.4667, 0.3]);
 
+console.log("\nTownships and administrative areas");
+// GeoNames files a US township as ADM3 named "Township of Parker", never as a populated
+// place, so no depth in class P could reach one. Both word orders must land on it.
+check("Township of Moorestown", "Township of Moorestown|NJ|USA", [39.96, -74.94, 0.3]);
+check("Moorestown Township, as written", "Moorestown Township|NJ|USA", [39.96, -74.94, 0.3]);
+check("the town still wins over the township", "Moorestown|NJ|USA", [39.9671, -74.9427, 0.1]);
+// Moorestown resolves to the TOWN for both spellings, and should: the populated place carries
+// "Moorestown Township" among its alternate names, so an exact point beats the area. A
+// township only answers for itself where no settlement shares the name.
+check("a township with no town of the name", "Township of Lost River|IN|USA", [38.5, -86.4, 1.5]);
+checkFlag("that township is an area, not a point", "Township of Lost River|IN|USA", "administrative area");
+check("Buckinghamshire, now a real record", "Buckinghamshire||GBR", [51.8, -0.8, 1.2]);
+checkFlag("Buckinghamshire is flagged as an area", "Buckinghamshire||GBR", "administrative area");
+checkFlag("Bedford is still the town", "Bedford||GBR", "");
+
+console.log("\nHarbours - 6,220 of them, previously dropped by a class mismatch");
+check("Stromness Harbour", "Stromness Harbour||GBR", [58.96, -3.29, 0.5]);
+
+console.log("\nForts and other military additions");
+check("Fort Ticonderoga", "Fort Ticonderoga|NY|USA", [43.84, -73.38, 0.3]);
+
 console.log("\nFormer and minor places are matched, but flagged");
 // Carried so a historical address still resolves, ranked last so they never win a tie, and
 // marked so a live dataset can show whether carrying them was worth it.

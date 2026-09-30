@@ -17,7 +17,7 @@ bases, airports, ports and rail terminals.
 
 The app is in the repository; the place data is not. Two steps:
 
-1. Download `geocoder-data.zip` from the [latest release][releases] (72 MB).
+1. Download `geocoder-data.zip` from the [latest release][releases] (84 MB).
 2. Unzip it into `dist/`, so that `dist/data/` sits next to `dist/geocoder.html`.
 
 ```
@@ -35,7 +35,7 @@ columns it detected, click Geocode, download the result.
 [releases]: https://github.com/FrivenSolutions/geocoder/releases/latest
 
 The data is a release asset rather than a committed file because Git keeps every version of
-everything forever. At 244 MB unpacked, each rebuild would add another 244 MB to the
+everything forever. At 288 MB unpacked, each rebuild would add another 288 MB to the
 repository's history permanently — deleted or not — and two refreshes would put a clone near a
 gigabyte. Git LFS has the same problem in a different shape: GitHub's free tier allows 1 GB of
 LFS storage and 1 GB of monthly bandwidth, so this data would allow four versions and about
@@ -184,11 +184,30 @@ Springfields, and the leader changes with the census. Rows decided this way say 
 
 ## Coverage
 
-5,387,805 places across 248 countries, 4,143 subdivisions, 39,720 counties.
+6,114,354 places across 248 countries, 4,478 subdivisions, 47,643 counties.
 
-Every populated place GeoNames records, with **no population threshold at all**, plus the
-military and transport slice: bases, naval stations, barracks, airports, airfields, heliports,
-ports, dockyards, ferry and rail terminals, border and customs posts.
+Every populated place GeoNames records, with **no population threshold at all**, plus four
+slices chosen for what people actually geocode:
+
+| Slice | Contents |
+|---|---|
+| **Military** | Bases, naval bases, installations, barracks, air bases, forts, artillery ranges, manoeuvre areas, coast guard stations, munitions plants, military schools, leased areas |
+| **Transport** | Airports, airfields, heliports, terminals, seaplane landings, ports, harbours, dockyards, wharves, landings, boatyards, ferries, rail stations and stops, bus stations, border and customs posts |
+| **Industry** | Factories, oil refineries, fuel depots, pipeline and transit terminals, office buildings, government facilities, and named buildings generally |
+| **Administrative** | Townships, counties, districts and every other civil division, ADM1 through ADM5 |
+
+Deliberately excluded: terrain, water, vegetation, roads and undersea features — 4.6M records
+of streams and hillsides with no geocoding value here, and a standing risk of turning a clean
+miss into a confident-looking point on a mountain.
+
+**Townships are why the administrative slice exists.** GeoNames files a US township as
+`A.ADM3` named `Township of Parker` — 29,387 of them — never as a populated place, so no
+amount of depth in class `P` could reach one. `fold()` normalizes the word order, so
+`Parker Township` and `Township of Parker` land on the same key.
+
+Administrative areas rank below anything with a real position, and are always reported
+`Approximate`: `Bedford` still finds the town, and only falls through to the borough when no
+settlement carries the name.
 
 That last part is the point. The Flow Map's coverage note diagnosed three absences —
 
@@ -215,7 +234,7 @@ node test/run-tests.mjs
 
 The data step needs `allCountries.txt`, `admin1CodesASCII.txt`, `admin2Codes.txt` and
 `countryInfo.txt` from [download.geonames.org](https://download.geonames.org/export/dump/).
-It writes `dist/data/` — 244 MB across 248 shards, of which the US is 11.5 MB and most
+It writes `dist/data/` — 288 MB across 248 shards, of which the US is 25.8 MB and most
 countries are under 1 MB. You only need this to refresh the data; to *use* the tool, take the
 release asset instead.
 

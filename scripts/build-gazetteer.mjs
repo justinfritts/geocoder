@@ -63,16 +63,40 @@ const SCALE = 10000;
  */
 const FACILITY = new Set([
     // military
-    "MILB", "NVB", "INSM", "BRKS", "AIRB", "MVA", "LTER", "RNGA",
+    "L.MILB", "L.NVB", "S.INSM", "S.BRKS", "S.AIRB", "L.MVA", "L.RNGA",
+    "S.FT", "S.STNC", "S.MFGM", "S.SCHM", "A.LTER", "A.ZNB",
     // air
-    "AIRP", "AIRF", "AIRH", "AIRQ", "AIRT", "AIRS",
+    "S.AIRP", "S.AIRF", "S.AIRH", "S.AIRQ", "S.AIRT", "H.AIRS",
     // sea
-    "PRT", "HBR", "DCKY", "WHRF", "LDNG", "FY", "FYT",
+    "L.PRT", "H.HBR", "S.DCKY", "S.WHRF", "S.LDNG", "S.FY", "S.FYT", "S.BTYD", "S.TRMO",
     // land
-    "RSTN", "RSTP", "BUSTN", "BUSTP",
+    "S.RSTN", "S.RSTP", "S.BUSTN", "S.BUSTP", "S.TRANT",
     // border
-    "PSTB", "PSTC", "CSTM",
+    "S.PSTB", "S.PSTC", "S.CSTM",
+    // industry and commerce
+    "S.MFG", "S.MFGQ", "S.BLDO", "S.DPOF", "S.OILR", "S.ADMF", "S.CTRF",
+    // named buildings of every other kind
+    "S.BLDG",
 ]);
+
+/**
+ * Administrative areas: civil divisions rather than settlements.
+ *
+ * This is where townships live. GeoNames files a US township as A.ADM3 named "Township of
+ * Parker", not as a populated place - 29,387 of them - so no amount of depth in class P could
+ * ever reach one. Counties and UK-style shires are the same story at ADM2.
+ *
+ * They are areas, not points, so they rank below everything that has a real position and are
+ * always reported as approximate.
+ */
+const ADMIN = new Set([
+    "A.ADM1", "A.ADM2", "A.ADM3", "A.ADM4", "A.ADM5", "A.ADMD", "A.ADMS",
+    "A.PRSH", "A.TERR", "A.ZN",
+    "A.ADM1H", "A.ADM2H", "A.ADM3H", "A.ADM4H", "A.ADM5H", "A.ADMDH",
+]);
+
+/** Everything carried that is not a populated place. */
+const EXTRA = new Set([...FACILITY, ...ADMIN]);
 
 /**
  * Populated places that exist, but should never win a tie against a real town.
@@ -83,6 +107,18 @@ const FACILITY = new Set([
  * hamlet because it happened to sort first.
  */
 const MINOR = new Set(["PPLX", "PPLL", "PPLQ", "PPLW", "PPLH", "PPLCH"]);
+
+/**
+ * What must not contribute to a derived subdivision or county centre.
+ *
+ * Those centres answer "roughly where in this area are things", so they are averaged over
+ * settlements. An administrative division is the area itself - averaging a county's own record
+ * into the county's centre is circular - and a named building is too fine-grained to move the
+ * answer in any meaningful direction. Bare codes, since every GeoNames code is unique across
+ * classes and pass 1 stores the code alone.
+ */
+const BARE_ADMIN = new Set([...ADMIN].map((code) => code.slice(2)));
+const NOT_A_SETTLEMENT = new Set([...MINOR, "BLDG", ...BARE_ADMIN]);
 
 const lines = (name) => readFileSync(join(src, name), "utf8").split("\n").filter((l) => l && !l.startsWith("#"));
 
@@ -108,7 +144,10 @@ function pickAlternates(name, ascii, alt, fcode) {
     if (!alt) {
         return [];
     }
-    const facility = fcode.slice(0, 3) !== "PPL";
+    // Only real facilities get the loose treatment. A base or airport is written half a dozen
+    // ways and its short code - KBED, TLV - is one of them; a county has no such identifier,
+    // so the looser rule would only let noise in.
+    const facility = fcode.slice(0, 3) !== "PPL" && !BARE_ADMIN.has(fcode);
     const primary = new Set(tokens(name).concat(tokens(ascii)));
     const out = [];
     for (const one of alt.split(",")) {
@@ -284,7 +323,17 @@ for await (const line of rl) {
     }
     const c = line.split("\t");
     const cls = c[6];
-    const keep = cls === "P" || ((cls === "S" || cls === "L") && FACILITY.has(c[7]));
+    /**
+     * Matched on class AND code together, rather than filtering to a set of classes and then
+     * checking codes against a bare list.
+     *
+     * The earlier version kept classes S and L and tested the code against a list that also
+     * held HBR, AIRS and LTER - which are classes H, H and A. Those three never matched
+     * anything, silently, and 6,220 harbours were missing from a gazetteer whose own source
+     * listed them as wanted. A code paired with its class cannot rot that way: a wrong pair
+     * matches nothing and shows up as a zero in the build summary.
+     */
+    const keep = cls === "P" || EXTRA.has(cls + "." + c[7]);
     if (!keep) {
         continue;
     }
@@ -376,7 +425,7 @@ for (const file of files) {
         pop.push(Number(r[8]) || 0);
         names.push(name.replace(/[\r\n\t]+/g, " "));
 
-        if (!MINOR.has(fcode)) {
+        if (!NOT_A_SETTLEMENT.has(fcode)) {
             if (at1 >= 0) {
                 let sum = a1Sum[at1];
                 if (!sum) {

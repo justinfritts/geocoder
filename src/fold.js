@@ -38,6 +38,22 @@ const COMBINING = /[\u0300-\u036f]/g;
  * Ordered longest-first so "naval air station" is not eaten by "air station".
  */
 const PHRASE = [
+    /**
+     * "Township of Parker" and "Parker Township" are the same place written two ways, and
+     * GeoNames stores the first while every spreadsheet writes the second. Moving the noun to
+     * the end normalizes both onto one key, and it is applied to the data and the query alike
+     * so neither form can miss.
+     *
+     * Anchored and non-global, so only a name that begins "<noun> of " is touched at all -
+     * "Isle of Wight" is untouched because "isle" is not in the list, and "Stratford-upon-Avon"
+     * never had the shape.
+     *
+     * It does fire on longer names that happen to start that way: "City of London Cemetery"
+     * becomes "london cemetery city". That looks wrong written down and costs nothing, because
+     * the rule is applied to the stored name and the typed name alike - both sides land on the
+     * same key, so no lookup can miss because of it.
+     */
+    [/^(township|city|town|village|borough|county|parish|municipality|district|province|region|department|commune) of (.+)$/, "$2 $1"],
     [/\bjoint base\b/g, "jb"],
     [/\bnaval air station\b/g, "nas"],
     [/\bnaval air facility\b/g, "naf"],
@@ -121,8 +137,8 @@ export function tokens(value) {
  * "Essex" and "St. Louis". Comparing the two without stripping the boilerplate makes the
  * county column useless for breaking ties, which is the only thing it is there for.
  */
-const ADMIN_SUFFIX = /(county|parish|borough|district|municipality|municipio|censusarea|departamento|department|province|prefecture|region)$/;
-const ADMIN_PREFIX = /^(cityof|countyof|municipalityof|districtof|provinceof)/;
+const ADMIN_SUFFIX = /(county|parish|borough|district|municipality|municipio|censusarea|departamento|department|province|prefecture|region|township|city|town)$/;
+const ADMIN_PREFIX = /^(cityof|countyof|municipalityof|districtof|provinceof|townshipof)/;
 
 /** Folds a county or district name down to the part that actually identifies it. */
 export function foldAdmin(value) {
