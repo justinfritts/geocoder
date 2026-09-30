@@ -159,6 +159,78 @@ function tierOf(code) {
     return code.slice(0, 3) === "PPL" ? 1 : 2;
 }
 
+/**
+ * County abbreviations, the ones British addresses use as a matter of course.
+ *
+ * "READING BERKS" is not sloppy data, it is how the address is written. None of these appear
+ * in GeoNames, which records administrative areas under their full names, so the abbreviation
+ * has to be expanded before it can be matched against anything.
+ */
+const COUNTY_ABBREV = {
+    beds: "bedfordshire", berks: "berkshire", bucks: "buckinghamshire",
+    cambs: "cambridgeshire", ches: "cheshire", corn: "cornwall", cumb: "cumbria",
+    derbys: "derbyshire", dors: "dorset", dur: "durham", glos: "gloucestershire",
+    hants: "hampshire", herefs: "herefordshire", herts: "hertfordshire",
+    hunts: "huntingdonshire", lancs: "lancashire", leics: "leicestershire",
+    lincs: "lincolnshire", middx: "middlesex", norf: "norfolk",
+    northants: "northamptonshire", northumb: "northumberland", notts: "nottinghamshire",
+    oxon: "oxfordshire", salop: "shropshire", shrops: "shropshire", som: "somerset",
+    staffs: "staffordshire", suff: "suffolk", warks: "warwickshire", warwicks: "warwickshire",
+    wilts: "wiltshire", worcs: "worcestershire", yorks: "yorkshire",
+    nyorks: "northyorkshire", syorks: "southyorkshire", wyorks: "westyorkshire",
+    eyorks: "eastyorkshire", esussex: "eastsussex", wsussex: "westsussex",
+    wmids: "westmidlands", gtrmanchester: "greatermanchester", gtrlondon: "greaterlondon",
+    london: "greaterlondon", tyneandwear: "tyneandwear",
+};
+
+/**
+ * Folded names of every county in one country, for deciding whether a trailing token is
+ * administratively meaningful at all. Built once per country, on demand: most files never
+ * need it, and scanning 47,643 counties per row would show.
+ */
+let countyNamesByCountry = null;
+
+function countyNamesFor(countryCode, idx) {
+    if (!countyNamesByCountry) {
+        countyNamesByCountry = new Map();
+        for (let i = 0; i < idx.a2n.length; i++) {
+            if (!idx.a2n[i]) {
+                continue;
+            }
+            const cc = idx.a2cc[i];
+            let list = countyNamesByCountry.get(cc);
+            if (!list) {
+                list = [];
+                countyNamesByCountry.set(cc, list);
+            }
+            list.push(foldAdmin(idx.a2n[i]));
+        }
+    }
+    return countyNamesByCountry.get(countryCode) || [];
+}
+
+/** Expands an abbreviation, then reports whether the token names an area this country has. */
+function qualifierIsAdministrative(q, countryCode, idx) {
+    if (!q) {
+        return false;
+    }
+    if (resolveSubdivision(q, countryCode) !== null || resolveCounty(q, countryCode, idx) >= 0) {
+        return true;
+    }
+    // A ceremonial county such as Berkshire survives in district names - West Berkshire -
+    // long after it stopped being an administrative unit of its own.
+    return q.length >= 5 && countyNamesFor(countryCode, idx).some((name) => name.indexOf(q) >= 0);
+}
+
+/** Does this candidate sit in the area the trailing token names? */
+function rowIsInQualifier(q, row, shard, idx) {
+    const a2 = shard.a2[row];
+    const a1 = shard.a1[row];
+    const n2 = a2 >= 0 ? foldAdmin(idx.a2n[a2]) : "";
+    const n1 = a1 >= 0 ? foldAdmin(idx.a1n[a1]) : "";
+    return n2 === q || n1 === q || (q.length >= 5 && (n2.indexOf(q) >= 0 || n1.indexOf(q) >= 0));
+}
+
 /** The best rank present among a set of candidate rows. */
 function bestTier(rows, shard, idx) {
     let best = Infinity;
@@ -476,8 +548,49 @@ export function locate(input, options) {
      * The longest city that leaves a usable qualifier wins, and a state given on the row is
      * never abandoned to make a split fit - a state that resolves still has to hold.
      */
+    /**
+     * A postcode or district number run onto the end of the name.
+     *
+     * "METHWOLD THETFORD NORFOLK 1P26 4NR" and "PRAHA 10" both carry a code where a name
+     * should end. Trailing tokens containing a digit are dropped, from the end inwards, and
+     * only as a retry - so "Al Majaz 1" and "4th Mikrorayon", which match as written, are
+     * never touched.
+     */
+    let trimmedText = strippedText || cityText;
     if (!candidates) {
-        const words = (strippedText || cityText).split(/\s+/).filter(Boolean);
+        const words = trimmedText.split(/\s+/).filter(Boolean);
+        while (words.length > 1 && /\d/.test(words[words.length - 1])) {
+            words.pop();
+        }
+        const withoutCode = words.join(" ");
+        if (withoutCode !== trimmedText) {
+            const retry = shard.byName.get(fold(withoutCode));
+            trimmedText = withoutCode;
+            if (retry) {
+                candidates = retry;
+                adjusted = 'ignored the code at the end of "' + cityText + '"';
+            }
+        }
+    }
+
+    /**
+     * A qualifier run onto the end of the name, with no delimiter: "READING BERKS",
+     * "CANTERBURY KENT", "THETFORD NORFOLK". British exports produce these in bulk.
+     *
+     * The trailing words are used as a CONSTRAINT rather than discarded. Discarding them is
+     * what makes this dangerous, and measuring proved it: a discard rule placed
+     * "GRANGE PARK LONDON" in Northamptonshire and "PARACUELLOS DEL JARAMA" in Cuenca,
+     * confidently and wrongly, because the token it threw away was the one identifying the
+     * place.
+     *
+     * Where the qualifier names an area the country actually has but no candidate sits in it,
+     * the head is still accepted if it is unambiguous on its own. That covers the abolished
+     * ceremonial counties - Reading has not been administratively in Berkshire since 1998,
+     * but "READING BERKS" is still how people write it. A qualifier that names nothing,
+     * like "DEL JARAMA", fails this test, so that row stays blank rather than guessing.
+     */
+    if (!candidates) {
+        const words = trimmedText.split(/\s+/).filter(Boolean);
         for (let keep = words.length - 1; keep >= 1 && !candidates; keep--) {
             const head = words.slice(0, keep).join(" ");
             const tail = words.slice(keep).join(" ");
@@ -485,24 +598,38 @@ export function locate(input, options) {
             if (!found) {
                 continue;
             }
-            // The qualifier has to mean something: a subdivision, or a county that exists.
-            const asSub = resolveSubdivision(tail, countryCode);
-            const asCounty = resolveCounty(tail, countryCode, idx);
-            if (asSub === null && asCounty < 0) {
+            const folded = foldAdmin(tail);
+            const q = COUNTY_ABBREV[folded] || folded;
+            const namesRealArea = resolveSubdivision(q, countryCode) !== null
+                || resolveCounty(q, countryCode, idx) >= 0;
+            if (!namesRealArea && !qualifierIsAdministrative(q, countryCode, idx)) {
                 continue;
             }
-            if (subdivision !== null && asSub !== null && asSub !== subdivision) {
-                // The row named a state and the qualifier names a different one. Trust the
-                // column, not the guess.
+            const inside = found.filter((row) => rowIsInQualifier(q, row, shard, idx));
+            if (inside.length) {
+                candidates = inside;
+                adjusted = 'read "' + cityText + '" as "' + head + '" in "' + tail + '"';
+                continue;
+            }
+            /**
+             * Nothing of that name sits in the named area. What that means depends on whether
+             * the area is one we can actually test against.
+             *
+             * "Greater London" is a county in the data, so the check is authoritative: if no
+             * Grange Park is recorded there, the row is inconsistent and saying so beats
+             * quietly returning the Grange Park in Northamptonshire.
+             *
+             * "Berkshire" is not - it stopped being an administrative county in 1998 and
+             * survives only inside district names like West Berkshire, so membership cannot
+             * be tested at all. There, falling back to the name alone is the best available
+             * answer, and "READING BERKS" resolves to Reading.
+             */
+            if (namesRealArea) {
                 continue;
             }
             candidates = found;
-            if (subdivision === null && asSub !== null) {
-                subdivision = asSub;
-            } else if (asCounty >= 0) {
-                countyKey = foldAdmin(idx.a2n[asCounty]);
-            }
-            adjusted = 'read "' + cityText + '" as "' + head + '" qualified by "' + tail + '"';
+            adjusted = 'read "' + cityText + '" as "' + head + '" near "' + tail
+                + '" - that name is not an area in the data, so the place name alone had to be unambiguous';
         }
     }
 
