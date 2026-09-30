@@ -159,6 +159,18 @@ function tierOf(code) {
     return code.slice(0, 3) === "PPL" ? 1 : 2;
 }
 
+/** The best rank present among a set of candidate rows. */
+function bestTier(rows, shard, idx) {
+    let best = Infinity;
+    for (const row of rows) {
+        const tier = tierOf(idx.fcc[shard.fc[row]]);
+        if (tier < best) {
+            best = tier;
+        }
+    }
+    return best;
+}
+
 /** Rows this far apart are the same place recorded twice, not a genuine ambiguity. */
 const DUPLICATE_TOLERANCE_DEG = 0.15;
 
@@ -172,6 +184,25 @@ function allWithinTolerance(rows, shard, scale) {
     }
     return true;
 }
+
+/**
+ * ISO 3166-1 official names that GeoNames does not use for the country.
+ *
+ * GeoNames calls RU "Russia"; the ISO short name, and what an ERP export writes, is "Russian
+ * Federation". The gazetteer's own name table cannot cover these because it is built from
+ * GeoNames' names, so they are declared here and folded the same way.
+ */
+const COUNTRY_ALIAS = {
+    russianfederation: "RU", vietnam: "VN", vietnam2: "VN", laopeoplesdemocraticrepublic: "LA",
+    bruneidarussalam: "BN", republicofkorea: "KR", republicofthephilippines: "PH",
+    unitedrepublicoftanzania: "TZ", republicofmoldova: "MD", czechia: "CZ",
+    slovakrepublic: "SK", kingdomofsaudiarabia: "SA", unitedmexicanstates: "MX",
+    peoplesrepublicofchina: "CN", republicofindia: "IN", republicofsouthafrica: "ZA",
+    federalrepublicofgermany: "DE", frenchrepublic: "FR", italianrepublic: "IT",
+    kingdomofthenetherlands: "NL", swissconfederation: "CH", republicofturkiye: "TR",
+    turkiye: "TR", republicofirlande: "IE", republicofireland: "IE",
+    unitedkingdomofgreatbritainandnorthernireland: "GB", hongkongsar: "HK", macaosar: "MO",
+};
 
 /** Accepts ISO 3166-1 alpha-3 (documented), alpha-2, or a recognized name. */
 export function resolveCountry(token) {
@@ -189,8 +220,19 @@ export function resolveCountry(token) {
             return at;
         }
     }
-    const byName = idx.cn[fold(token)];
-    return byName === undefined ? null : byName;
+    const folded = fold(token);
+    const byName = idx.cn[folded];
+    if (byName !== undefined) {
+        return byName;
+    }
+    const alias = COUNTRY_ALIAS[folded];
+    if (alias !== undefined) {
+        const at = idx.ccIndex.get(alias);
+        if (at !== undefined) {
+            return at;
+        }
+    }
+    return null;
 }
 
 /**
@@ -360,7 +402,7 @@ export function locate(input, options) {
         }
     }
 
-    const countyKey = foldAdmin(input.county);
+    let countyKey = foldAdmin(input.county);
     const cityText = String(input.city == null ? "" : input.city).trim();
     const cityKey = fold(cityText);
     /**
@@ -418,6 +460,49 @@ export function locate(input, options) {
         if (retry) {
             candidates = retry;
             adjusted = 'ignored the leading number in "' + cityText + '"';
+        }
+    }
+
+    /**
+     * A qualifier run onto the end of the name, with no delimiter: "READING BERKS",
+     * "CANTERBURY KENT", "THETFORD NORFOLK". UK exports produce these in bulk.
+     *
+     * The trailing words are used as a COUNTY CONSTRAINT rather than discarded. Discarding
+     * them is what makes this dangerous: "GRANGE PARK LONDON" then matches a Grange Park in
+     * Northamptonshire, and "PARACUELLOS DEL JARAMA" matches a Paracuellos in Cuenca, both
+     * confidently and both wrong. Keeping the qualifier means the token that identifies the
+     * place is doing work instead of being thrown away.
+     *
+     * The longest city that leaves a usable qualifier wins, and a state given on the row is
+     * never abandoned to make a split fit - a state that resolves still has to hold.
+     */
+    if (!candidates) {
+        const words = (strippedText || cityText).split(/\s+/).filter(Boolean);
+        for (let keep = words.length - 1; keep >= 1 && !candidates; keep--) {
+            const head = words.slice(0, keep).join(" ");
+            const tail = words.slice(keep).join(" ");
+            const found = shard.byName.get(fold(head));
+            if (!found) {
+                continue;
+            }
+            // The qualifier has to mean something: a subdivision, or a county that exists.
+            const asSub = resolveSubdivision(tail, countryCode);
+            const asCounty = resolveCounty(tail, countryCode, idx);
+            if (asSub === null && asCounty < 0) {
+                continue;
+            }
+            if (subdivision !== null && asSub !== null && asSub !== subdivision) {
+                // The row named a state and the qualifier names a different one. Trust the
+                // column, not the guess.
+                continue;
+            }
+            candidates = found;
+            if (subdivision === null && asSub !== null) {
+                subdivision = asSub;
+            } else if (asCounty >= 0) {
+                countyKey = foldAdmin(idx.a2n[asCounty]);
+            }
+            adjusted = 'read "' + cityText + '" as "' + head + '" qualified by "' + tail + '"';
         }
     }
 
@@ -505,6 +590,35 @@ export function locate(input, options) {
     if (subdivision !== null) {
         const narrowed = matches.filter((row) => shard.a1[row] === subdivision);
         if (narrowed.length === 0) {
+            /**
+             * The state is real, and the place is real, but the state does not contain it.
+             *
+             * Usually the data is stale rather than wrong: Hyderabad sat in Andhra Pradesh
+             * until Telangana was split off in 2014, and exports still say the old one.
+             * Bulgarian and Hungarian rows show the same thing against municipality
+             * boundaries that have moved.
+             *
+             * Dropping the state is safe on the same terms as dropping an unrecognized one:
+             * the match must still be unique on city and country alone, so nothing is being
+             * guessed, and the row says what happened so a genuine data error is still
+             * visible. If it is not unique, the ambiguity is reported as usual.
+             */
+            const withoutState = candidates.filter((row) => tierOf(idx.fcc[shard.fc[row]]) === bestTier(candidates, shard, idx));
+            if (withoutState.length === 1 || (withoutState.length > 1 && allWithinTolerance(withoutState, shard, scale))) {
+                const row = withoutState[0];
+                const code = idx.fcc[shard.fc[row]];
+                return {
+                    lat: shard.lat[row] / scale,
+                    lon: shard.lon[row] / scale,
+                    place: describe(row, shard, country),
+                    kind: describeKind(code),
+                    code: code,
+                    caveat: caveatOf(code),
+                    approximate: ADMIN.has(code) || undefined,
+                    adjusted: 'ignored "' + stateToken + '" - it is a real subdivision of '
+                        + countryCode + ' but does not contain "' + cityText + '"',
+                };
+            }
             return { error: 'Cannot find "' + describeInput(parts) + '" - no "' + cityText + '" in ' + (idx.a1n[subdivision] || stateToken) + ", " + countryCode };
         }
         matches = narrowed;

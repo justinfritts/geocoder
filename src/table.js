@@ -93,7 +93,51 @@ export function parseDelimited(text, delimiter) {
         row.push(field);
         rows.push(row);
     }
-    return rows.filter((r) => r.length > 1 || (r.length === 1 && r[0] !== ""));
+    return repairSpuriousQuoting(rows.filter((r) => r.length > 1 || (r.length === 1 && r[0] !== "")), delimiter);
+}
+
+/**
+ * Undoes CSV comma-quoting applied to a file that is not comma separated.
+ *
+ * Exports do this: the writer quotes any value containing a comma, as CSV requires, but the
+ * file is pipe separated. A correct RFC 4180 parse then swallows the pipes inside the quotes
+ * and returns the whole line as one field, so the state and country silently vanish:
+ *
+ *   "PRAHA - VINOHRADY, PRAHA 10||CZECH REPUBLIC"
+ *
+ * reads as a single value rather than three. In one real 9,424 row file this affected 404
+ * rows, every one of which failed with "no country given" - a confusing message, because the
+ * country was plainly there in the source.
+ *
+ * Only short rows are touched, and only when re-splitting actually yields the width the rest
+ * of the file has, so a genuinely quoted value containing a delimiter is left alone.
+ */
+function repairSpuriousQuoting(rows, delimiter) {
+    if (rows.length < 2) {
+        return rows;
+    }
+    const width = new Map();
+    for (const r of rows) {
+        width.set(r.length, (width.get(r.length) || 0) + 1);
+    }
+    let common = 1;
+    let best = 0;
+    for (const [n, count] of width) {
+        if (count > best) {
+            best = count;
+            common = n;
+        }
+    }
+    if (common < 2) {
+        return rows;
+    }
+    return rows.map((r) => {
+        if (r.length >= common || r.length !== 1 || r[0].indexOf(delimiter) < 0) {
+            return r;
+        }
+        const split = r[0].split(delimiter);
+        return split.length === common ? split : r;
+    });
 }
 
 function quote(value) {
