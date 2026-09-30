@@ -74,6 +74,23 @@ function check(label, input, expect, options) {
     }
 }
 
+/** Asserts the weaker ambiguity rule reports itself distinctly from the stronger one. */
+function checkChosen(label, input) {
+    const country = resolveCountry(input.country);
+    if (country !== null) {
+        need(getIndex().ccc[country]);
+    }
+    const got = locate(input, { ambiguity: "inhabited" });
+    const ok = got.lat !== undefined && got.onlyInhabited === true && got.dominant === false;
+    if (ok) {
+        pass++;
+        console.log("  ok    " + label.padEnd(42) + "onlyInhabited, not dominant  -> " + got.place);
+    } else {
+        fail++;
+        console.log("  FAIL  " + label.padEnd(42) + (got.error || "onlyInhabited=" + got.onlyInhabited + " dominant=" + got.dominant));
+    }
+}
+
 /** Asserts two inputs do NOT collapse onto the same place. */
 function checkDistinct(label, a, b) {
     const one = [a, b].map((q) => {
@@ -227,6 +244,18 @@ check("Busan, setting off", "Busan||KOR", "ambiguous");
 check("Busan, setting on", "Busan||KOR", [35.1028, 129.0403], { acceptDominant: true });
 check("Springfield, setting on", { city: "Springfield", state: "", county: "", country: "USA" }, "ambiguous", { acceptDominant: true });
 check("Paris needs no setting", "Paris||FRA", [48.8534, 2.3488]);
+
+console.log("\nOnly-one-inhabited, a level above dominant and off by default");
+// Real rows from a live dataset. Each matches two places in its own state, one carrying a
+// census population and the other none.
+check("Greenwood MS, level off", { city: "Greenwood", state: "MS", county: "", country: "USA" }, "ambiguous", { ambiguity: "dominant" });
+check("Greenwood MS, level on", { city: "Greenwood", state: "MS", county: "", country: "USA" }, [33.5162, -90.1795, 0.3], { ambiguity: "inhabited" });
+check("Marion IL, level on", { city: "Marion", state: "IL", county: "", country: "USA" }, [37.7306, -88.9331, 0.3], { ambiguity: "inhabited" });
+check("Lima OH, level on", { city: "Lima", state: "OH", county: "", country: "USA" }, [40.7426, -84.1052, 0.3], { ambiguity: "inhabited" });
+// Still refused: several candidates carry a population, so there is a real choice to make.
+check("Springfield USA stays ambiguous", { city: "Springfield", state: "", county: "", country: "USA" }, "ambiguous", { ambiguity: "inhabited" });
+// The weaker rule must be distinguishable from the stronger one in the output.
+checkChosen("Greenwood is marked as the inhabited pick", { city: "Greenwood", state: "MS", county: "", country: "USA" });
 
 console.log("\nApproximate fallback, blank by default");
 check("missing place, blank", "Notaplaceatall|MA|USA", "no place of that name");

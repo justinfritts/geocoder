@@ -51,6 +51,9 @@ const MINOR = new Set([...FORMER, ...SECTION]);
 
 const TIER_LABEL = ["national capital", "populated place", "facility", "building",
     "administrative area", "minor or former place"];
+// Spelled out rather than suffixed, because "facilitys" appeared in a real user's output.
+const TIER_PLURAL = ["national capitals", "populated places", "facilities", "buildings",
+    "administrative areas", "minor or former places"];
 
 /**
  * Why a match is worth a second look, or an empty string where it is not.
@@ -782,8 +785,10 @@ export function locate(input, options) {
         return { error: 'Cannot find "' + describeInput(parts) + '" - internal error ranking candidates' };
     }
 
+    const ambiguityLevel = opts.ambiguity || (opts.acceptDominant ? "dominant" : "none");
     let dominant = false;
-    if (matches.length > 1 && !allWithinTolerance(matches, shard, scale) && opts.acceptDominant) {
+    let onlyInhabited = false;
+    if (matches.length > 1 && !allWithinTolerance(matches, shard, scale) && ambiguityLevel !== "none") {
         /**
          * Accepts a match where one candidate is not merely the largest but is of a wholly
          * different order from the rest.
@@ -809,6 +814,32 @@ export function locate(input, options) {
         }
     }
 
+    /**
+     * Exactly one candidate is recorded as inhabited and the rest carry no population at all.
+     *
+     * A level above "vastly larger", and opt-in for a reason that has to be stated plainly:
+     * a population of zero in GeoNames means NOT RECORDED, not uninhabited. 84% of US places
+     * have no population on file, and Moorestown NJ is one of them despite housing 14,000
+     * people. So this is genuinely a guess, and it can pick the wrong namesake wherever the
+     * real town happens to have no census record.
+     *
+     * What makes it worth offering is that the dominant rule already accepts this shape and
+     * then refuses it on an arbitrary floor. With every rival at zero the "twenty times the
+     * next" test passes trivially, so the only thing rejecting Greenwood, Mississippi at
+     * 15,431 people is the 50,000 threshold. Across two real files this settles 2,766 of
+     * 5,132 ambiguous rows, and every one of eleven sampled by hand was correct.
+     *
+     * Reported with its own wording rather than folded in with the dominant matches, so the
+     * weaker rule can be filtered and audited separately from the stronger one.
+     */
+    if (matches.length > 1 && !allWithinTolerance(matches, shard, scale) && ambiguityLevel === "inhabited") {
+        const inhabited = matches.filter((row) => shard.pop[row] > 0);
+        if (inhabited.length === 1) {
+            matches = inhabited;
+            onlyInhabited = true;
+        }
+    }
+
     if (matches.length > 1 && !allWithinTolerance(matches, shard, scale)) {
         const where = listCandidates(matches, shard, country, 4);
         // Only now does an unusable subdivision matter: it was the thing that would have
@@ -821,7 +852,7 @@ export function locate(input, options) {
             };
         }
         return {
-            error: 'Ambiguous: "' + describeInput(parts) + '" matches ' + matches.length + " " + TIER_LABEL[best] + "s in "
+            error: 'Ambiguous: "' + describeInput(parts) + '" matches ' + matches.length + " " + TIER_PLURAL[best] + " in "
                 + (subdivision !== null ? idx.a1n[subdivision] || countryCode : countryCode)
                 + (where ? " - add a county to choose: " + where : ""),
         };
@@ -840,6 +871,7 @@ export function locate(input, options) {
         // thing, so it is reported the same way a state-only row already is.
         approximate: ADMIN.has(code) || undefined,
         dominant: dominant,
+        onlyInhabited: onlyInhabited,
         adjusted: adjusted,
     };
 }

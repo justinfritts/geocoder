@@ -294,7 +294,7 @@ async function run() {
     const options = {
         defaultCountry: el("default-country").value,
         fallback: el("fallback").value,
-        acceptDominant: el("dominant").checked,
+        ambiguity: el("dominant").value,
     };
 
     /**
@@ -392,6 +392,9 @@ async function run() {
             if (result.dominant) {
                 notes.push("Chosen as far larger than the alternatives");
             }
+            if (result.onlyInhabited) {
+                notes.push("Check: chosen as the only candidate recorded as inhabited");
+            }
             if (result.adjusted) {
                 notes.push("Check: " + result.adjusted);
             }
@@ -408,7 +411,7 @@ async function run() {
                     dominant++;
                 }
             }
-            if (result.caveat || result.adjusted) {
+            if (result.caveat || result.adjusted || result.onlyInhabited) {
                 flagged++;
             }
         } else {

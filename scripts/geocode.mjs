@@ -8,7 +8,8 @@
  *     --no-header            the first row is data, not column titles
  *     --default-country=USA  used only where a row names no country
  *     --fallback=none|state|country
- *     --dominant             accept a candidate vastly larger than its namesakes
+ *     --ambiguity=none|dominant|inhabited   how hard to try when a name is shared
+ *     --dominant             shorthand for --ambiguity=dominant
  *
  * The page does the same work and is nicer to use, but it has a ceiling: a browser tab holds
  * the parsed rows, and building a result there costs roughly two and a half times the input.
@@ -79,7 +80,7 @@ const loadShard = (cc) => {
 const options = {
     defaultCountry: flags["default-country"] || "",
     fallback: flags.fallback || "none",
-    acceptDominant: Boolean(flags.dominant),
+    ambiguity: flags.ambiguity || (flags.dominant ? "dominant" : "none"),
 };
 
 /**
@@ -226,6 +227,9 @@ for await (const row of records(input, delimiter)) {
         if (result.dominant) {
             notes.push("Chosen as far larger than the alternatives");
         }
+        if (result.onlyInhabited) {
+            notes.push("Check: chosen as the only candidate recorded as inhabited");
+        }
         if (result.adjusted) {
             notes.push("Check: " + result.adjusted);
         }
@@ -239,7 +243,7 @@ for await (const row of records(input, delimiter)) {
         } else {
             ok++;
         }
-        if (result.caveat || result.adjusted) {
+        if (result.caveat || result.adjusted || result.onlyInhabited) {
             flagged++;
         }
     } else {

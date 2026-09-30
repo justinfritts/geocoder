@@ -56,16 +56,27 @@
   <p class="field-hint">This applies only to places that could not be found. A row that names
      <em>no</em> city already resolves to its state or country centre regardless of this
      setting, because there is nothing else it could mean.</p>
-  <label class="check">
-    <input type="checkbox" id="dominant">
-    Where one candidate is vastly larger than the rest, take it
+  <label class="field">
+    <span class="field-name">When several places share the name</span>
+    <select id="dominant">
+      <option value="none">Leave the row blank and list the candidates</option>
+      <option value="dominant">Take one that is vastly larger than the rest</option>
+      <option value="inhabited">Also take the only one recorded as inhabited</option>
+    </select>
+    <span class="field-hint">Blank by default.</span>
   </label>
-  <p class="field-hint">Off by default. This is not &ldquo;pick the biggest&rdquo;: a candidate
-     qualifies only at 50,000 people <em>and</em> twenty times the next one. That resolves
-     <code>Busan, KOR</code>, which matches a city of 3.3 million and a hamlet in Jangseong-gun,
-     while leaving <code>Springfield, USA</code> ambiguous &mdash; Missouri, Massachusetts and
-     Illinois are 167,882, 153,606 and 116,565, and there is no honest way to choose. Rows
-     decided this way say so in the Status column.</p>
+  <p class="field-hint"><strong>Vastly larger</strong> is not &ldquo;pick the biggest&rdquo;: a
+     candidate qualifies only at 50,000 people <em>and</em> twenty times the next. That resolves
+     <code>Busan, KOR</code> &mdash; a city of 3.3 million against a hamlet in Jangseong-gun &mdash;
+     while leaving <code>Springfield, USA</code> ambiguous, because Missouri, Massachusetts and
+     Illinois are 167,882, 153,606 and 116,565 and there is no honest way to choose.</p>
+  <p class="field-hint"><strong>Only one recorded as inhabited</strong> goes further and is a
+     real guess. A population of zero in GeoNames means <em>not recorded</em>, not uninhabited:
+     84% of US places have none on file, and Moorestown NJ is one of them despite housing 14,000
+     people. It settles about half of all ambiguous rows &mdash; <code>GREENWOOD, MS</code>
+     resolves to Leflore County at 15,431 rather than the Itawamba namesake &mdash; and it can
+     pick wrong wherever the real town simply has no census record. Rows decided by either rule
+     say which one in the Status column.</p>
   <button id="run">Geocode</button>
   <p class="field-hint">On Chrome and Edge you will be asked where to save first, and the result
      is written to that file as it is produced rather than held in memory. That is what makes a
