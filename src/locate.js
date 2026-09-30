@@ -637,6 +637,48 @@ export function locate(input, options) {
     }
 
     /**
+     * A settlement-type word wrapped around the name: "MOSHAV BNAYA", "KAZANLAK TOWN",
+     * "RAVNO POLE VILLAGE". The word says what the place is, not what it is called.
+     *
+     * Safe as a retry because anything genuinely carrying the word - Salt Lake City, Mexico
+     * City - matches as written and never reaches here.
+     */
+    if (!candidates) {
+        const stripped = trimmedText
+            .replace(/^(moshav|kibbutz|nahal)\s+/i, "")
+            .replace(/\s+(town|city|village|vilage|municipality)$/i, "");
+        if (stripped !== trimmedText) {
+            const retry = shard.byName.get(fold(stripped));
+            if (retry) {
+                candidates = retry;
+                adjusted = 'read "' + cityText + '" as "' + stripped + '"';
+            }
+        }
+    }
+
+    /**
+     * "CITY - DISTRICT", which Czech, Slovak and Israeli exports produce in quantity:
+     * "PRAHA - MODRANY", "KOSICE - MESTSKA CAST SACA", "TEL AVIV - JAFFA".
+     *
+     * The part BEFORE the dash is taken - the parent city - and the district is dropped. The
+     * part after is deliberately not tried, though measuring showed it would resolve another
+     * 72 rows, because it resolves them to the wrong place: "PRAHA - VINOHRADY" has a
+     * Vinohrady in Brno, 200 km from Prague, and nothing about that match announces itself as
+     * wrong. Falling back to the parent city is a few kilometres out and says so.
+     *
+     * Last of the repairs, because it is the coarsest.
+     */
+    if (!candidates && trimmedText.indexOf(" - ") > 0) {
+        const parent = trimmedText.split(" - ")[0].trim();
+        const retry = parent ? shard.byName.get(fold(parent)) : null;
+        if (retry) {
+            candidates = retry;
+            adjusted = 'read "' + cityText + '" as its parent place "' + parent
+                + '" - the district after the dash was dropped';
+        }
+    }
+
+    /**
      * The name is not a place but an administrative area - a county or a province.
      *
      * Exports map a region column onto the city field constantly, and UK data is the worst
@@ -815,27 +857,33 @@ export function locate(input, options) {
     }
 
     /**
-     * Exactly one candidate is recorded as inhabited and the rest carry no population at all.
+     * One candidate dwarfs the rest in relative terms, whatever its absolute size.
      *
-     * A level above "vastly larger", and opt-in for a reason that has to be stated plainly:
-     * a population of zero in GeoNames means NOT RECORDED, not uninhabited. 84% of US places
-     * have no population on file, and Moorestown NJ is one of them despite housing 14,000
-     * people. So this is genuinely a guess, and it can pick the wrong namesake wherever the
-     * real town happens to have no census record.
+     * This is the dominant rule with the 50,000 floor removed, and the floor is the only
+     * thing that was ever arbitrary about it. Greenwood, Mississippi at 15,431 against a
+     * namesake with no population recorded is not a close call; neither is Marion, Illinois
+     * at 17,803 against one of 181. Both were refused purely for being small.
      *
-     * What makes it worth offering is that the dominant rule already accepts this shape and
-     * then refuses it on an arbitrary floor. With every rival at zero the "twenty times the
-     * next" test passes trivially, so the only thing rejecting Greenwood, Mississippi at
-     * 15,431 people is the 50,000 threshold. Across two real files this settles 2,766 of
-     * 5,132 ambiguous rows, and every one of eleven sampled by hand was correct.
+     * Expressed as a ratio it also survives the gazetteer growing. An earlier version of this
+     * asked whether exactly ONE candidate had a population at all, which worked until more
+     * alternate names were indexed, brought a third and fourth namesake into the candidate
+     * set, and quietly stopped firing on Marion and Lima. A ratio does not care how many
+     * rivals there are, only how small they all remain.
      *
-     * Reported with its own wording rather than folded in with the dominant matches, so the
-     * weaker rule can be filtered and audited separately from the stronger one.
+     * Still opt-in, and still a guess, for a reason worth stating plainly: a population of
+     * zero in GeoNames means NOT RECORDED rather than uninhabited. 84% of US places have none
+     * on file, and Moorestown NJ is one of them despite housing 14,000 people. Where the real
+     * town is the one without a census record, this picks the wrong namesake.
+     *
+     * Springfield, USA is unaffected at any setting: Missouri, Massachusetts and Illinois are
+     * 167,882, 153,606 and 116,565, nowhere near twenty times each other.
      */
     if (matches.length > 1 && !allWithinTolerance(matches, shard, scale) && ambiguityLevel === "inhabited") {
-        const inhabited = matches.filter((row) => shard.pop[row] > 0);
-        if (inhabited.length === 1) {
-            matches = inhabited;
+        const ranked = matches.slice().sort((a, b) => shard.pop[b] - shard.pop[a]);
+        const top = shard.pop[ranked[0]];
+        const next = shard.pop[ranked[1]];
+        if (top > 0 && top >= next * 20) {
+            matches = [ranked[0]];
             onlyInhabited = true;
         }
     }

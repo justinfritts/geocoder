@@ -393,7 +393,7 @@ async function run() {
                 notes.push("Chosen as far larger than the alternatives");
             }
             if (result.onlyInhabited) {
-                notes.push("Check: chosen as the only candidate recorded as inhabited");
+                notes.push("Check: chosen as many times larger than the other candidates");
             }
             if (result.adjusted) {
                 notes.push("Check: " + result.adjusted);

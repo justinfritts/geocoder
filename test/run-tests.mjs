@@ -245,6 +245,17 @@ check("Busan, setting on", "Busan||KOR", [35.1028, 129.0403], { acceptDominant: 
 check("Springfield, setting on", { city: "Springfield", state: "", county: "", country: "USA" }, "ambiguous", { acceptDominant: true });
 check("Paris needs no setting", "Paris||FRA", [48.8534, 2.3488]);
 
+console.log("\nSettlement-type words, and CITY - DISTRICT");
+check("MOSHAV TNUVOT", "MOSHAV TNUVOT||ISRAEL", [32.31, 34.94, 0.4]);
+check("KIBBUTZ EYAL", "KIBBUTZ EYAL||ISRAEL", [32.23, 34.94, 0.4]);
+check("KAZANLAK TOWN", "KAZANLAK TOWN||BULGARIA", [42.62, 25.39, 0.4]);
+check("RAVNO POLE VILLAGE", "RAVNO POLE VILLAGE||BULGARIA", [42.66, 23.52, 0.4]);
+check("PRAHA - MODRANY -> Praha", "PRAHA - MODRANY||CZECH REPUBLIC", [50.08, 14.44, 0.4]);
+check("KOSICE - MESTSKA CAST SACA", "KOSICE - MESTSKA CAST SACA||SLOVAKIA", [48.72, 21.26, 0.4]);
+// Salt Lake City must not lose its "City": it matches as written, so no repair runs.
+check("Salt Lake City keeps its name", "Salt Lake City|UT|USA", [40.7608, -111.8911, 0.2]);
+check("Mexico City keeps its name", "Mexico City||MEX", [19.43, -99.13, 0.4]);
+
 console.log("\nOnly-one-inhabited, a level above dominant and off by default");
 // Real rows from a live dataset. Each matches two places in its own state, one carrying a
 // census population and the other none.
@@ -254,6 +265,11 @@ check("Marion IL, level on", { city: "Marion", state: "IL", county: "", country:
 check("Lima OH, level on", { city: "Lima", state: "OH", county: "", country: "USA" }, [40.7426, -84.1052, 0.3], { ambiguity: "inhabited" });
 // Still refused: several candidates carry a population, so there is a real choice to make.
 check("Springfield USA stays ambiguous", { city: "Springfield", state: "", county: "", country: "USA" }, "ambiguous", { ambiguity: "inhabited" });
+// A ratio, not a count of how many have a population. An earlier version asked whether
+// exactly one candidate had any population at all, and silently stopped firing on these two
+// once more alternate names brought a third namesake into the candidate set.
+check("Marion IL, rival of 181", { city: "Marion", state: "IL", county: "", country: "USA" }, [37.7306, -88.9331, 0.3], { ambiguity: "inhabited" });
+check("Lima OH, rival of 150", { city: "Lima", state: "OH", county: "", country: "USA" }, [40.7426, -84.1052, 0.3], { ambiguity: "inhabited" });
 // The weaker rule must be distinguishable from the stronger one in the output.
 checkChosen("Greenwood is marked as the inhabited pick", { city: "Greenwood", state: "MS", county: "", country: "USA" });
 

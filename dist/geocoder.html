@@ -177,7 +177,7 @@ a { color: var(--accent); }
     <select id="dominant">
       <option value="none">Leave the row blank and list the candidates</option>
       <option value="dominant">Take one that is vastly larger than the rest</option>
-      <option value="inhabited">Also take the only one recorded as inhabited</option>
+      <option value="inhabited">Also take one many times larger, at any size</option>
     </select>
     <span class="field-hint">Blank by default.</span>
   </label>
@@ -186,13 +186,15 @@ a { color: var(--accent); }
      <code>Busan, KOR</code> &mdash; a city of 3.3 million against a hamlet in Jangseong-gun &mdash;
      while leaving <code>Springfield, USA</code> ambiguous, because Missouri, Massachusetts and
      Illinois are 167,882, 153,606 and 116,565 and there is no honest way to choose.</p>
-  <p class="field-hint"><strong>Only one recorded as inhabited</strong> goes further and is a
-     real guess. A population of zero in GeoNames means <em>not recorded</em>, not uninhabited:
-     84% of US places have none on file, and Moorestown NJ is one of them despite housing 14,000
-     people. It settles about half of all ambiguous rows &mdash; <code>GREENWOOD, MS</code>
-     resolves to Leflore County at 15,431 rather than the Itawamba namesake &mdash; and it can
-     pick wrong wherever the real town simply has no census record. Rows decided by either rule
-     say which one in the Status column.</p>
+  <p class="field-hint"><strong>Many times larger</strong> is the same twenty-to-one test with
+     the 50,000 floor removed, which is the only arbitrary part of it. <code>GREENWOOD, MS</code>
+     at 15,431 against a namesake with no population recorded is not a close call, nor is
+     <code>MARION, IL</code> at 17,803 against one of 181 &mdash; both were refused only for
+     being small. It settles about half of all ambiguous rows, and it is a real guess: a
+     population of zero in GeoNames means <em>not recorded</em> rather than uninhabited, 84% of
+     US places have none on file, and Moorestown NJ is one of them despite housing 14,000
+     people. Where the real town is the one without a census record, this picks wrong. Rows
+     decided by either rule say which one in the Status column.</p>
   <button id="run">Geocode</button>
   <p class="field-hint">On Chrome and Edge you will be asked where to save first, and the result
      is written to that file as it is produced rather than held in memory. That is what makes a
@@ -1159,6 +1161,48 @@ function locate(input, options) {
     }
 
     /**
+     * A settlement-type word wrapped around the name: "MOSHAV BNAYA", "KAZANLAK TOWN",
+     * "RAVNO POLE VILLAGE". The word says what the place is, not what it is called.
+     *
+     * Safe as a retry because anything genuinely carrying the word - Salt Lake City, Mexico
+     * City - matches as written and never reaches here.
+     */
+    if (!candidates) {
+        const stripped = trimmedText
+            .replace(/^(moshav|kibbutz|nahal)\s+/i, "")
+            .replace(/\s+(town|city|village|vilage|municipality)$/i, "");
+        if (stripped !== trimmedText) {
+            const retry = shard.byName.get(fold(stripped));
+            if (retry) {
+                candidates = retry;
+                adjusted = 'read "' + cityText + '" as "' + stripped + '"';
+            }
+        }
+    }
+
+    /**
+     * "CITY - DISTRICT", which Czech, Slovak and Israeli exports produce in quantity:
+     * "PRAHA - MODRANY", "KOSICE - MESTSKA CAST SACA", "TEL AVIV - JAFFA".
+     *
+     * The part BEFORE the dash is taken - the parent city - and the district is dropped. The
+     * part after is deliberately not tried, though measuring showed it would resolve another
+     * 72 rows, because it resolves them to the wrong place: "PRAHA - VINOHRADY" has a
+     * Vinohrady in Brno, 200 km from Prague, and nothing about that match announces itself as
+     * wrong. Falling back to the parent city is a few kilometres out and says so.
+     *
+     * Last of the repairs, because it is the coarsest.
+     */
+    if (!candidates && trimmedText.indexOf(" - ") > 0) {
+        const parent = trimmedText.split(" - ")[0].trim();
+        const retry = parent ? shard.byName.get(fold(parent)) : null;
+        if (retry) {
+            candidates = retry;
+            adjusted = 'read "' + cityText + '" as its parent place "' + parent
+                + '" - the district after the dash was dropped';
+        }
+    }
+
+    /**
      * The name is not a place but an administrative area - a county or a province.
      *
      * Exports map a region column onto the city field constantly, and UK data is the worst
@@ -1337,27 +1381,33 @@ function locate(input, options) {
     }
 
     /**
-     * Exactly one candidate is recorded as inhabited and the rest carry no population at all.
+     * One candidate dwarfs the rest in relative terms, whatever its absolute size.
      *
-     * A level above "vastly larger", and opt-in for a reason that has to be stated plainly:
-     * a population of zero in GeoNames means NOT RECORDED, not uninhabited. 84% of US places
-     * have no population on file, and Moorestown NJ is one of them despite housing 14,000
-     * people. So this is genuinely a guess, and it can pick the wrong namesake wherever the
-     * real town happens to have no census record.
+     * This is the dominant rule with the 50,000 floor removed, and the floor is the only
+     * thing that was ever arbitrary about it. Greenwood, Mississippi at 15,431 against a
+     * namesake with no population recorded is not a close call; neither is Marion, Illinois
+     * at 17,803 against one of 181. Both were refused purely for being small.
      *
-     * What makes it worth offering is that the dominant rule already accepts this shape and
-     * then refuses it on an arbitrary floor. With every rival at zero the "twenty times the
-     * next" test passes trivially, so the only thing rejecting Greenwood, Mississippi at
-     * 15,431 people is the 50,000 threshold. Across two real files this settles 2,766 of
-     * 5,132 ambiguous rows, and every one of eleven sampled by hand was correct.
+     * Expressed as a ratio it also survives the gazetteer growing. An earlier version of this
+     * asked whether exactly ONE candidate had a population at all, which worked until more
+     * alternate names were indexed, brought a third and fourth namesake into the candidate
+     * set, and quietly stopped firing on Marion and Lima. A ratio does not care how many
+     * rivals there are, only how small they all remain.
      *
-     * Reported with its own wording rather than folded in with the dominant matches, so the
-     * weaker rule can be filtered and audited separately from the stronger one.
+     * Still opt-in, and still a guess, for a reason worth stating plainly: a population of
+     * zero in GeoNames means NOT RECORDED rather than uninhabited. 84% of US places have none
+     * on file, and Moorestown NJ is one of them despite housing 14,000 people. Where the real
+     * town is the one without a census record, this picks the wrong namesake.
+     *
+     * Springfield, USA is unaffected at any setting: Missouri, Massachusetts and Illinois are
+     * 167,882, 153,606 and 116,565, nowhere near twenty times each other.
      */
     if (matches.length > 1 && !allWithinTolerance(matches, shard, scale) && ambiguityLevel === "inhabited") {
-        const inhabited = matches.filter((row) => shard.pop[row] > 0);
-        if (inhabited.length === 1) {
-            matches = inhabited;
+        const ranked = matches.slice().sort((a, b) => shard.pop[b] - shard.pop[a]);
+        const top = shard.pop[ranked[0]];
+        const next = shard.pop[ranked[1]];
+        if (top > 0 && top >= next * 20) {
+            matches = [ranked[0]];
             onlyInhabited = true;
         }
     }
@@ -2079,7 +2129,7 @@ async function run() {
                 notes.push("Chosen as far larger than the alternatives");
             }
             if (result.onlyInhabited) {
-                notes.push("Check: chosen as the only candidate recorded as inhabited");
+                notes.push("Check: chosen as many times larger than the other candidates");
             }
             if (result.adjusted) {
                 notes.push("Check: " + result.adjusted);

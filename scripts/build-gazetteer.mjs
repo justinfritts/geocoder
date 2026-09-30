@@ -149,25 +149,50 @@ function pickAlternates(name, ascii, alt, fcode) {
     // so the looser rule would only let noise in.
     const facility = fcode.slice(0, 3) !== "PPL" && !BARE_ADMIN.has(fcode);
     const primary = new Set(tokens(name).concat(tokens(ascii)));
+    const usable = alt.split(",").filter((one) => one.length <= 60 && isLatin(one) && tokens(one).length);
     const out = [];
-    for (const one of alt.split(",")) {
-        if (out.length >= (facility ? 6 : 4) || one.length > 60 || !isLatin(one)) {
-            continue;
-        }
-        const word = tokens(one);
-        if (!word.length) {
-            continue;
-        }
-        if (facility) {
-            // A short all-caps-ish token is an identifier, not a translation.
-            if (one.length <= 5 || word.every((w) => primary.has(w)) || [...primary].every((w) => word.includes(w))) {
-                out.push(one);
-            }
-            continue;
-        }
-        if (word.every((w) => primary.has(w)) || [...primary].every((w) => word.includes(w))) {
+    const seen = new Set();
+    const cap = facility ? 8 : 7;
+    const push = (one) => {
+        if (!seen.has(one) && out.length < cap) {
+            seen.add(one);
             out.push(one);
         }
+    };
+    const isVariant = (one) => {
+        const word = tokens(one);
+        return word.every((w) => primary.has(w)) || [...primary].every((w) => word.includes(w));
+    };
+
+    // Spelling variants first: "Tel Aviv-Yafo" for "Tel Aviv". These share words with the
+    // primary name, and they are what the word-subset test was introduced to catch.
+    for (const one of usable) {
+        if (isVariant(one) || (facility && one.length <= 5)) {
+            push(one);
+        }
+    }
+
+    /**
+     * Then the first few alternates whatever they are, because the most important ones share
+     * no words with the primary name at all.
+     *
+     * The subset test alone discarded every endonym and exonym: Prague is stored as "Prague"
+     * with "Praha" among its alternates, and "praha" is not a variant of "prague" by any
+     * string test. The effect was not merely that "Praha, CZE" missed - with the real city
+     * unindexed under its own local name, a hamlet won the lookup instead, so "Torino" landed
+     * in Ferrara and "Moskva" in Tver Oblast. Wrong answers, confidently given.
+     *
+     * Position is a decent proxy here: GeoNames lists the local and major-language forms
+     * early, and the long tail of transliterations later. Four is enough for Praha, Roma,
+     * Napoli, Munchen and Cologne without reopening the door to sixty spellings of Tel Aviv.
+     */
+    let extra = 0;
+    for (const one of usable) {
+        if (extra >= 4) {
+            break;
+        }
+        push(one);
+        extra++;
     }
     return out;
 }
